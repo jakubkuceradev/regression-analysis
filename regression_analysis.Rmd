@@ -1,0 +1,553 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+### Knihovny
+
+```{r}
+# install.packages("Sleuth2")
+# install.packages("ggplot2")
+# install.packages("vtable")
+# install.packages("dplyr")
+# install.packages("car")
+# install.packages("lmtest")
+# install.packages("olsrr")
+
+library(Sleuth2)
+library(ggplot2)
+library(vtable)
+library(dplyr)
+library(car)
+library(lmtest)
+library(olsrr)
+```
+
+### Načtení dat
+
+```{r}
+data('ex0918', package = 'Sleuth2')
+data <- as.data.frame(ex0918)
+data$Continent <- as.factor(data$Continent)
+data
+```
+
+## Základní statistická šetření
+
+### Popis dat a proměnných
+
+Analyzovaná data pocházejí z datasetu ex0918 z knihovny sleuth2. Dataset obsahuje data o vývoji mouchy (Drosophila subobscura), která byla kolem roku 1980 náhodně zavlečena ze Starého světa do Severní Ameriky.
+
+Obsahuje 21 pozorování následujících 8 proměnných:
+
+-   **Continent** - Kontinent faktor s úrovněmi "NA" a "EU"
+
+-   **Latitude** - Zeměpisná šířka zeměpisná šířka (stupně)
+
+-   **Females** - Samice průměrná velikost křídel (103×log mm) samic mušek na logaritmické stupnici
+
+-   **SE.F** - standardní chyba velikosti křídel (103×log mm) samic mušek na logaritmické stupnici
+
+-   **Males** - Samci průměrná velikost křídel (103×log mm) samců mušek na logaritmické stupnici
+
+-   **SE. M** - standardní chyba velikosti křídel (103×log mm) samců na logaritmické stupnici
+
+-   **Ratio** - Poměr průměrné bazální délky a velikosti křídel samic
+
+-   **SE.R** - standardní chyba poměru průměrné bazální délky a velikosti křídel samic
+
+Vysvětlovanou proměnnou je Ratio. Proměnné SE.\* představují standardní chyby průměrů, nejedná se o měření jednotlivých much, ale o agregovaná data pro lokality. Při modelování závislosti Ratio na jiných proměnných budeme používat Continent, Latitude, Females, Males
+
+### Základní statistické míry
+
+Použijeme funkci `sumtable()` pro rychlý přehled základních statistik numerických proměnných.
+
+```{r}
+summ <- c('notNA(x)', 'mean(x)', 'sd(x)', 'min(x)', 'pctile(x)[25]', 
+          'median(x)', 'pctile(x)[75]', 'max(x)', 'IQR(x)')
+vars <- c('Continent', 'Latitude', 'Females', 'Males', 'Ratio')
+sumtable(data, out="return", summ=summ, vars=vars)
+```
+
+Z tabulky statistik vidíme průměr, medián, rozptyl a další míry pro klíčové proměnné. Poměr Ratio má průměr \~0.83 a medián \~0.83. Proměnná Latitude pokrývá rozsah od 36 do 56 stupňů. Velikost křídel samic (Females) má průměr 914, kdežto velikost křídel samců (Males) má průměr 815.
+
+Dataset obsahuje 9 lokalit v Severní Americe (NA) a 12 lokalit v Evropě (EU). Rozdělení pozorování mezi kontinenty je poměrně vyvážené.
+
+```{r}
+vars <- c('Latitude', 'Females', 'Males', 'Ratio')
+ sumtable(data, out="return", summ=summ, vars=vars, group="Continent", group.long=T)
+```
+
+### Vizualizace dat
+
+Pro vizualizaci rozdělení poměru `Ratio` a vztahů mezi proměnnými použijeme grafy.
+
+```{r fig.width=10, fig.height=5}
+
+plot_ratio_hist <- ggplot(data, aes(x = Ratio)) +
+  geom_histogram(aes(y = ..density..), binwidth = 0.005, fill = "skyblue", color = "black") +
+  geom_density(color = "red") +
+  labs(title = "Rozdělení poměru báze křídla k velikosti křídla (Ratio)", x = "Ratio", y = "Hustota") +
+  theme_minimal()
+
+plot_ratio_continent_boxplot <- ggplot(data, aes(x = Continent, y = Ratio, fill = Continent)) +
+  geom_boxplot(show.legend = FALSE) +
+  labs(title = "Poměr Ratio dle kontinentu", x = "Kontinent", y = "Ratio") +
+  theme_minimal()
+
+cowplot::plot_grid(plot_ratio_hist, plot_ratio_continent_boxplot, ncol = 2)
+```
+
+Histogram Ratio naznačuje poměrně rovnoměrné rozdělení od 0.82 do 0.84. Box plot ukazuje, že lokality v Severní Americe (NA) mají tendenci větší průměrné Ratio než lokality v Evropě (EU), s menším rozptylem hodnot.
+
+Prozkoumáme vztahy mezi Ratio a numerickými prediktory (Latitude, Females, Males) pomocí bodových grafů, s rozlišením dle kontinentu.
+
+```{r fig.width=10, fig.height=15}
+plot_ratio_lat <- ggplot(data, aes(x = Latitude, y = Ratio, color = Continent)) +
+  geom_point(alpha = 0.7, size = 3) +
+  geom_smooth(method = "lm", se = FALSE) +
+  labs(title = "Ratio vs. Latitude dle kontinentu") +
+  theme_minimal()
+
+plot_ratio_fem <- ggplot(data, aes(x = Females, y = Ratio, color = Continent)) +
+  geom_point(alpha = 0.7, size = 3) +
+  geom_smooth(method = "lm", se = FALSE) +
+  labs(title = "Ratio vs. Females dle kontinentu") +
+  theme_minimal()
+
+plot_ratio_mal <- ggplot(data, aes(x = Males, y = Ratio, color = Continent)) +
+  geom_point(alpha = 0.7, size = 3) +
+  geom_smooth(method = "lm", se = FALSE) +
+  labs(title = "Ratio vs. Males dle kontinentu") +
+  theme_minimal()
+
+cowplot::plot_grid(plot_ratio_lat, plot_ratio_fem, plot_ratio_mal, nrow = 3)
+```
+
+Z grafů plyne:
+
+-   Ratio má k Latitude slabý kladný vztah v Evropě a slabý záporný vztah v Severní Americe.
+
+-   Ratio má kladný vztah k Females (velikosti křídel) v Evropě a neutrální/zanedbatelný vztah v Severní Americe. Čím větší křídla, tím větší Ratio.
+
+-   Ratio má slabý kladný vztah k Males (velikosti křídel) v Evropě a slabý záporný vztah v Severní Americe. Čím větší křídla, tím v Evropě větší Ratio a tím v Severní Americe menší Ratio.
+
+## Lineární regrese s numerickým regresorem
+
+Vybereme proměnnou `Females` jako numerický regresor pro vysvětlení variability v proměnné Ratio, protože se na základě grafu zdá, že má s vysvětlovanou proměnou `Ratio` nejsilnější lineární vztah.
+
+### Odhad modelu a interpretace
+
+Nafitujeme lineární a kvadratický model lineární regrese s regresorem `Female` a regresandem `Ratio`.
+
+```{r}
+fit_lin <- lm(Ratio ~ Females, data=data)
+fit_quad <- lm(Ratio ~ Females + I(Females^2), data=data)
+data_lin <- cbind(data, predict(fit_lin, interval = "prediction"))
+data_quad <- cbind(data, predict(fit_quad, interval = "prediction"))
+```
+
+Prohlédneme si statistické shrnutí a ANOVA tabulku pro nafitované modely.
+
+```{r}
+summary(fit_lin)
+anova(fit_lin)
+```
+
+### Evaluace
+
+**Residua:** Predikce lineárního model se od skutečné hodnoty odchylovala nejhůře o -0.0171 a 0.0093. V prostředních 50% se odchylovala nejhůře o -0.0033 a 0.0045. Mediánem odchylky byla hodnota -0.0014.
+
+**Koeficienty:** Odhad koeficientu pro průsečík je přibližně 0.79. Odhad koeficientu pro Females je přibližně 0.000036. Hodnota koeficientu je velmi nízká, takový model se pravděpodobně nebude přiliš odchylovat od modelu predikujícího průměrem.
+
+**Koeficient Determinace R²:** S koeficientem 0.00729 je lineární model jen o velmi málo lepší než model, který vždy predikuje průměrnou hodnotou. Délká křídel samičky vysvětluje jen malou část variability v proměnné `Ratio`.
+
+### Hypotéza
+
+H0: Skutečný koeficient u Females je nulový.
+
+HA: Skutečný koeficient u Females není nulový.
+
+**Závěr:** Na základě výsledku F-testu s p-hodnotou 0.71 na hladině významnosti 5% nezamítáme nulovou hypotézu o nulovosti všech koeficientů. Přidání regeresoru `Females` nezlepšuje statisticky významně kvalitu modelu.
+
+```{r}
+summary(fit_quad)
+anova(fit_quad)
+```
+
+### Evaluace
+
+**Residua:** Predikce kvadratického model se od skutečné hodnoty odchylovala nejhůře o -0.0125 a 0.0089. V prostředních 50% se odchylovala nejhůře o -0.0045 a 0.0042. Mediánem odchylky byla hodnota 0.0036. Celkově se residua kvadratického modelu velmi podobají residuím lineárního modelu.
+
+**Koeficienty:** Odhad koeficientu pro průsečík je přibližně -8.18. Odhad koeficientu pro Females je přibližně 0.02 a odhad koeficientu pro I\*(Females\^2) je −0.00001. Koeficienty jsou i v tomto případě velmi malé.
+
+**Koeficient Determinace R²:** S koeficientem 0.15 je kvadratický model jen o málo lepší než model, který vždy predikuje průměrnou hodnotou. Je však významně lepší než model lineární. Porovnáme-li adjustovanou hodnotu R² lineárního modelu -0.045 a odpovídající hodnotu kvadratického modelu 0.056, usoudíme, že přidání kvadratického členu má pozitivní vliv na kvalitu modelu.
+
+**ANOVA:** Přidání samotného regresoru `Females` vedlo k p-hodnotě 0.7. Následné přidání kvadratického členu vedlo k p-hodnotě 0.09. Na standardní hladině významnosti 5% se stále jedná o statisticky nevýznamné zlepšení. Jedná se však o výrazně nižší hodnotu než u samotného lineárního členu.
+
+### Hypotéza
+
+H0: Všechny skutečné koeficienty (kromě průsečíku) jsou nulové.
+
+HA: Nějaký skutečný koeficient (kromě průsečíku) je nenulový.
+
+**Závěr:** Na základě výsledku F-testu s p-hodnotou 0.23 na hladině významnosti 5% nezamítáme nulovou hypotézu o nulovosti všech koeficientů. Přidání regeresoru `Females` a jeho kvadratické verze nezlepšuje statisticky významně kvalitu modelu. Nicméně je nutno podotknout, že p-hodnota kvadratického modelu je významně nižší než p-hodnota modelu lineárního.
+
+### Graf regresní závislosti
+
+Vizualizujeme vztah mezi vysvětlovanou proměnnou `Ratio` a vysvětlující proměnnou `Females`.
+
+```{r}
+p1 <- ggplot() +
+  geom_point(data = data_lin, aes(x = Females, y = Ratio), alpha = 0.6) +
+  geom_line(data = data_lin, aes(x = Females, y = fit), size = 1, color = "red") +
+  geom_ribbon(data = data_lin, aes(x = Females, ymin = lwr, ymax = upr), alpha = 0.1) +
+  labs(title = "Lineární model") +
+  theme_minimal()
+
+p2 <- ggplot() +
+  geom_point(data = data_quad, aes(x = Females, y = Ratio), alpha = 0.6) +
+  geom_line(data = data_quad, aes(x = Females, y = fit), size = 1, color = "red") +
+  geom_ribbon(data = data_quad, aes(x = Females, ymin = lwr, ymax = upr), alpha = 0.1) +
+  labs(title = "Kvadratický model") +
+  theme_minimal()
+
+cowplot::plot_grid(p1, p2, nrow=2)
+
+```
+
+Vzhledem k výsledkům z předchozích testů je tvar křivek nepřekvapivý. Přímka lineárního modelu je téměř vodorovná. Hodnota `Ratio` na `Females` samotných pravděpodobně téměř vůbec nezávisí. Zdá se, že informace o původu `Continent` byla pro vysvětlení závislosti klíčová.
+
+## Analýza rozptylu s kategoriální regresorem
+
+Vybereme proměnnou `Continent` jako kategoriální regresor pro vysvětlení variability v proměnné `Ratio`.
+
+### Odhad modelu a interpretace
+
+Nafitujeme model lineární regrese s kategorickým regresorem. R automaticky vytvoří dummy proměnnou a vybere jednu úroveň faktoru jako referenční úroveň.
+
+```{r}
+fit_cat <- lm(Ratio ~ Continent, data = data)
+data_cat <- cbind(data, predict(fit_cat, interval = "prediction"))
+```
+
+Prohlédneme si statistické shrnutí a ANOVA tabulku pro nafitovaný model.
+
+```{r}
+summary(fit_cat)
+anova(fit_cat)
+```
+
+### Evaluace
+
+**Residua:** Predikce kategorického modelu se od skutečné hodnoty odchylovala nejhůře o -0.0145 a 0.0103. V prostředních 50% se odchylovala nejhůře o -0.0027 a 0.0023. Mediánem odchylky byla hodnota 0.0006. V prostředních 50% i v mediánu jsou residua významně menší než u numerického regresoru.
+
+**Koeficienty:** Odhad koeficientu pro průsečík je přibližně 0.83144. Odhad koeficientu pro ContinentEU je přibližně -0.0078. Tedy je-li hodnota `Continent` NA (Severní Amerika) pak predikuje model hodnotu 0.83144. V případě hodnoty `Continent` EU (Evropa) predikuje základem sníženým o 0.0078, tedy hodnotou 0,823666.
+
+**Koeficient Determinace R²:** S koeficientem 0.3776 je kategorický model zatím vysvětluje největší podíl variability. Adjustovaná hodnota 0.3448 je také dosud nejvyšší.
+
+### Hypotéza
+
+H0: Střední hodnota Ratio je stejná na obou kontinentech (NA a EU).
+
+HA: Střední hodnota Ratio se liší mezi kontinenty.
+
+**Závěr:** Na základě p-hodnoty 0.003 na hladině významnosti 5% **zamítáme** nulovou hypotézu ve prospěch alternativy, že střední hodnoty se mezi kontinenty **liší**. Na rozdíl od numerického regresoru pozorujeme statisticky významnou závislost na kategorickém regresoru `Continent`.
+
+```{r}
+data_na <- data[data$Continent == "NA",]
+data_eu <- data[data$Continent == "EU",]
+mean_na <- mean(data_na$Ratio)
+mean_eu <- mean(data_eu$Ratio)
+cat("Průměr proměnné Ratio je", mean_na, "v Severní Americe a", mean_eu, "v Evropě.")
+```
+
+Z vypsaného průměru na jednotlivých kontinentech vidíme, že fitnuté koeficienty skutečně odpovídají.
+
+Rozdělení hodnoty `Ratio` napříč kontinenty včetně průměrů je vidět i na grafu.
+
+```{r}
+ggplot(data_cat, aes(x = Continent, y = Ratio)) +
+    geom_point() +
+    stat_summary(
+        geom = "point",
+        fun.y = "mean",
+        size = 3,
+        shape = 21,
+        fill = "red"
+    ) +
+    labs(title = "Kategorický model") +
+    theme_minimal()
+```
+
+## Regresní model s numerickým, kategoriálním regresorem a interakcí
+
+Nyní uvažujeme model, který zahrnuje Females, Continent, a navíc i jejich interakci.
+
+### Odhad modelu a interpretace
+
+Použijeme syntaxi regresor1 \* regresor2 k zahrnutí hlavních efektů i interakce.
+
+```{r}
+fit_int <- lm(Ratio ~ Continent * Females, data = data)
+fit_int_reverse <- lm(Ratio ~ Females * Continent, data = data)
+data_int <- cbind(data, predict(fit_int, interval="prediction"))
+```
+
+Prohlédneme si nejdříve statistické shrnutí nafitovaného modelu.
+
+```{r}
+summary(fit_int)
+```
+
+### Evaluace
+
+**Residua:** Predikce modelu s interakcí se od skutečné hodnoty odchylovala nejhůře o -0.0072 a 0.0103. V prostředních 50% se odchylovala nejhůře o -0.0021 a 0.0025. Mediánem odchylky byla hodnota 0.0002. Tyto hodnoty jsou zatím nejlepší.
+
+**Koeficienty:** Odhad koeficientu pro průsečík je přibližně 0.8255. Odhad koeficientu pro ContinentEU je přibližně -0.2263. Odhad koeficientu pro Females je přibližně 0.000007. Interakční koeficient (změna směrnice Females v případě ContinentEU) Females:ContinentEU je odhadnut na 0.0002.
+
+**Koeficient Determinace R²:** S koeficientem 0.5861 se jedná o dosud nejlepší model. Adjustovaná hodnota 0.5131 je také nejvyšší.
+
+### Hypotézy
+
+H0: Všechny skutečné koeficienty (kromě průsečíku) jsou nulové.
+
+HA: Nějaký skutečný koeficient (kromě průsečíku) je nenulový.
+
+**Závěr:** Na základě výsledku F-testu s p-hodnotou 0.0015 na hladině významnosti 5% zamítáme nulovou hypotézu ve prospěch alternativy, že nějaký skutečný koeficient (kromě průsečíku) je nenulový. Pozorujeme tedy statisticky významnou závislost na regresorech.
+
+H0: Konkrétní skutečný koeficient je nulový.
+
+HA: Konkrétní skutečný koeficient není nulový.
+
+**Závěr:** Na základě výsledků t-testu s p-hodnotami 0.159, 0.965 a 0.178 na hladině významnosti 5% nezamítáme žádnou nulovou hypotézu o nulovosti konkrétního koeficientu. Ačkoliv je celková nenulovost statisticky významná, nedokážeme prokázat nenulovost žádného konkrétního koeficientu.
+
+Prohlédneme si ANOVA tabulky v obou pořadích.
+
+```{r}
+anova(fit_int)
+anova(fit_int_reverse)
+```
+
+**ANOVA:** Přidání regresoru `Continent` vedlo ve všech případech ke statisticky významnému zlepšení. Přidání regresoru `Females` bylo významné pouze pokud model již obsahoval regresor `Continent`. Přidání interakčního členu nevedlo ke statisticky významnému zlepšení.
+
+**Interakční člen**: Ačkoliv se z dat a ze zvolených koeficientů modelu zdá, že efekt regresoru `Females` je výrazně odlišný v Severní Americe a v Evropě, neexistuje statisticky významný důkaz. Na velmi omezeném datovém vzorku takový jev mohl vzniknout i pohou náhodou.
+
+### Graf regresní závislosti s interakcí
+
+Graficky zobrazíme regresní přímky pro každý kontinent, abychom viděli, jak se sklon liší.
+
+```{r}
+ggplot() +
+    geom_point(data = data_int, aes(x = Females, y = Ratio, color = Continent), alpha = 0.6) +
+    geom_line(data = data_int, aes(x = Females, y = fit, color = Continent), size = 1) +
+    geom_ribbon(data = data_int, aes(x = Females, ymin = lwr, ymax = upr, fill = Continent), alpha = 0.1) +
+    labs(title = "Model s interakcí") +
+    theme_minimal()
+```
+
+## Model s více regresory a výběr finálního modelu
+
+### Významnost Regresorů
+
+Nejdříve vyzkoušíme statistickou významnost samotných regresorů.
+
+```{r}
+anova(lm(Ratio ~ Latitude, data = data))
+anova(lm(Ratio ~ Males, data = data))
+anova(lm(Ratio ~ SE.M, data = data))
+anova(lm(Ratio ~ Females, data = data))
+anova(lm(Ratio ~ SE.F, data = data))
+anova(lm(Ratio ~ Continent, data = data))
+```
+
+Takto je jediným statisticky významný regresorem proměnná `Continent`. Ten zjevně bude součástí každého úspěšného modelu, vyzkoušíme tedy významnost dalších regresorů společně s ním.
+
+```{r}
+anova(lm(Ratio ~ Continent + Latitude, data = data))
+anova(lm(Ratio ~ Continent + Males, data = data))
+anova(lm(Ratio ~ Continent + SE.M, data = data))
+anova(lm(Ratio ~ Continent + Females, data = data))
+anova(lm(Ratio ~ Continent + SE.F, data = data))
+```
+
+Jako jediný další významný regresor se prokázala proměnná `Females`. Zkusíme stejný postupem najít další významný regresor.
+
+```{r}
+anova(lm(Ratio ~ Continent + Females + Latitude, data = data))
+anova(lm(Ratio ~ Continent + Females + Males, data = data))
+anova(lm(Ratio ~ Continent + Females + SE.M, data = data))
+anova(lm(Ratio ~ Continent + Females + SE.F, data = data))
+```
+
+Žádný další významný regresor již nebyl nalezen. Dále můžeme sestrojit model obsahující všechny potenciální regresory a analyzovat jejich významnost pomocí t-testů.
+
+```{r}
+summary(lm(Ratio ~ Continent + Females + Males + SE.F + SE.M + Latitude, data = data))
+```
+
+I tento přístup označil jako významné pouze regresory `Content` a `Females`.
+
+### Postup
+
+Prvním krokem pro nalezení vhodného modelu bude nalezení nejlepšího modelu podle informačních kritérií.
+
+K nejlepšímu modelu budeme postupně hledat podmodely, které jeho kvalitu významně nezhorší.
+
+Jako vhodný model prohlásíme ten nejlepší z nich, který je zároveň statisticky významně lepší než jeho podmodely a neobsahuje žádné nevýznamné regresory.
+
+### Volba modelu
+
+K nalezení nejšikovnějšího modelu použijeme sekvenční přístup a funkci `step`.
+
+```{r}
+step(
+    lm(Ratio~1,data=data),
+    scope = list(lower=~1,upper=~Continent * Males * Females * Latitude * SE.F * SE.M),
+    data = data
+)
+```
+
+Na základě předchozích výsledků nafitujeme zajímavé modely a zobrazíme informační kritéria.
+
+```{r}
+fit_intercept <- lm(Ratio ~ 1, data = data)
+fit_continent <- lm(Ratio ~ Continent, data = data)
+fit_add <- lm(Ratio ~ Continent + Females, data = data)
+fit_int <- lm(Ratio ~ Continent + Females + Continent:Females, data = data)
+fit_with_males <- lm(Ratio ~ Continent + Females + Males + Continent:Females, data = data)
+fit_complex <- lm(formula = Ratio ~ Continent + Females + Males + SE.M + Continent:Females, 
+    data = data)
+
+models <- list(fit_intercept, fit_continent, fit_add, fit_int, fit_with_males, fit_complex)
+cbind(
+    AIC(fit_intercept, fit_continent, fit_add, fit_int, fit_with_males, fit_complex),
+    BIC(fit_intercept, fit_continent, fit_add, fit_int, fit_with_males, fit_complex)
+)
+```
+
+Dále budeme postupně aplikovat testy **model vs. podmodel** dokud nenalezneme nejlepší model, který je statisticky významně lepší než ten jednodušší.
+
+```{r}
+anova(fit_intercept, fit_continent, fit_add, fit_int, fit_with_males, fit_complex)
+```
+
+Nejlepší model, který je statisticky významně lepší než ten předchozí, je 3. model (Ratio \~ Continent + Females). Porovnáme jej ještě přímo s 5. nadějným modelem.
+
+```{r}
+anova(fit_add, fit_with_males)
+```
+
+Ani oproti 3. modelu není 5. model průkazně lepší. Prohlédneme tedy ještě ANOVA tabulku samotného 3. modelu.
+
+```{r}
+anova(fit_add)
+```
+
+Přidáním regresoru `Continent` i `Females` je model statisticky významně vylepšen.
+
+```{r}
+summary(fit_add)
+```
+
+### Evaluace
+
+**Residua:** Predikce kategorického modelu se od skutečné hodnoty odchylovala nejhůře o -0.0089 a 0.0103. V prostředních 50% se odchylovala nejhůře o -0.0018 a 0.0014. Mediánem odchylky byla hodnota 0.0004. Tyto hodnoty jen o málo horší než u modelu s interakcí.
+
+**Koeficienty:** Odhad koeficientu pro průsečík je přibližně 0.6627 (oproti 0.8255 u `fit_int`). Odhad koeficientu pro ContinentEU je přibližně −0,0103 (oproti -0.2263 u `fit_int`). Odhad koeficientu pro Females je přibližně 0,0001862 (oproti 0.000007 u `fit_int`).
+
+Model s interakcí měl oproti aditivnímu modelu velmi nízky koeficient u `Females`, kromě `Continent` se při predikci velmi opíral o interakční člen. Aditivní model neobsahuje interakční člen, proto je koeficient u `Females` výrazně vyšší. Jelikož se liší průměrná hodnota `Females` napříč regiony, vyšší koeficient u `Females` způsobil snížení koeficientu u `ContinentEU`. Vyšší koeficient u `Females` zároveň vedl ke snížení hodnoty průsečíku (intersect).
+
+**Koeficient Determinace R²:** Koeficient 0.538 aditivního modelu je jen o 0.048 horší než u modelu s interakcí. Adjustovaná hodnota 0.4867 je o 0.026 horší než u modelu s interakcí.
+
+### Hypotézy
+
+H0: Konkrétní skutečný koeficient je nulový a regresor pro model je významný.
+
+HA: Konkrétní skutečný koeficient není nulový a regresor pro model není významný.
+
+**Závěr:** Na základě výsledků t-testu s p-hodnotami 0.00025 a 0.02229 na hladině významnosti 5% zamítáme všchny nulové hypotézy ve prospěch alternativ, že konkrétní koeficienty **nejsou** nulové a že regresory **jsou** pro model významné.
+
+### Interpretace
+
+Model se samotným kategorickým regresorem `Continent` sám vysvětluje až 37.76% variability. Model se samotným regresorem `Females` vysvětluje pouze 0.73% variability, pomáhá však dovysvětlit část zbylé variability a model s oběma regresory vysvětluje až 53.8%.
+
+### Vizualizace
+
+```{r}
+data_add <- cbind(data, predict(fit_add, interval="prediction"))
+ggplot() +
+    geom_point(data = data_add, aes(x = Females, y = Ratio, color = Continent), alpha = 0.6) +
+    geom_line(data = data_add, aes(x = Females, y = fit, color = Continent), size = 1) +
+    geom_ribbon(data = data_add, aes(x = Females, ymin = lwr, ymax = upr, fill = Continent), alpha = 0.1) +
+    labs(title = "Aditivní model") +
+    theme_minimal()
+```
+
+## Ověření předpokladů použitých metod pro výběr finálního modelu
+
+## Autokorelace reziduí
+
+Model lineární regrese předpokládá, že chyba mezí odhadem a skutečnými hodnotami je náhodná. Předpokladem je tedy i nezávislost reziduí. S nezávislostí chyb počítájí použité t a F statistiky.
+
+Sledujeme zda jsou rezidua vzájemně korelovaná. Z grafu žádná zjevná závislost neplyne.
+
+```{r}
+plot(fit_add, which=1, col=c("blue"))
+```
+
+### Hypotéza
+
+H0: Residua jsou vzájemně nezávislá.
+
+HA: Residua nejsou vzájemně nezávislá (jsou autokorelovaná).
+
+```{r}
+ols_test_correlation(fit_add)
+```
+
+**Závěr:** Na základě výsledků testu autokorelace s p-hodnotou 0.98 na hladině významnosti 5% nezamítáme nulovou hypotézu o vzájemné nezávislosti reziduí.
+
+## Normalita reziduí
+
+Ačkoliv normalita reziduí není předpokladem modelu lineární regrese, umožňuje nám dělat silnější tvrzení o jeho vlastnostech. Silné výchylky od normality mají negativní dopad na přesnost použitých t a F testů (obzvlášť u malých vzorků).
+
+Z grafu se zdá, že je normalita reziduí silně porušena.
+
+```{r}
+plot(fit_add, which=2, col=c("blue"))
+```
+
+### Hypotéza
+
+H0: Residua jsou normálně rozdělena.
+
+HA: Residua nejsou normálně rozdělena.
+
+```{r}
+ols_test_normality(fit_add)
+```
+
+**Závěr:** Na základě výsledků testu normality Cramer-von Mises s p-hodnotou \~0.0000 na hladině významnosti 5% zamítáme nulovou hypotézu ve prospěch alternativy, že rezidua **nejsou** normálně rozdělena. Na základě ostatních testů bychom nulovou hypotézu nezamítli.
+
+## **Homoskedasticita reziduí**
+
+Předpokladem modelu lineární regrese je, že rozptyl chyby je konstantní, tedy že rezidua jsou homoskedastická.
+
+Na grafu nesledujeme žádné známky heteroskedasticity.
+
+```{r}
+plot(fit_add, which=3, col=c("blue"))
+```
+
+### Hypotéza
+
+H0: Residua jsou homoskedastická.
+
+HA: Residua nejsou homoskedastická (jsou heteroskedastická).
+
+```{r}
+ols_test_breusch_pagan(fit_add)
+```
+
+**Závěr:** Na základě výsledků testu heterskedasticity s p-hodnotou 0.31 na hladině významnosti 5% nezamítáme nulovou hypotézu o homoskedasticitě reziduí.
